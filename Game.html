@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Driving Simulator</title>
+    <!-- Tailwind CSS for a clean, responsive UI -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Inter', sans-serif;
+            background-color: #1a202c; /* Tailwind's gray-900 */
+        }
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+        #ui-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            transition: opacity 0.5s ease-in-out;
+        }
+        .ui-box {
+            background-color: #2d3748; /* Tailwind's gray-800 */
+            padding: 2.5rem;
+            border-radius: 1rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            color: #e2e8f0; /* Tailwind's gray-200 */
+            text-align: center;
+        }
+        .btn {
+            background-image: linear-gradient(to right, #4c51bf, #667eea);
+            padding: 0.75rem 2rem;
+            border-radius: 0.5rem;
+            font-weight: bold;
+            color: white;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2), 0 4px 6px -2px rgba(0, 0, 0, 0.1);
+        }
+        .label {
+            color: #cbd5e0; /* Tailwind's gray-300 */
+            font-weight: 600;
+        }
+        .select {
+            background-color: #4a5568; /* Tailwind's gray-700 */
+            color: white;
+            border-radius: 0.5rem;
+            padding: 0.5rem;
+        }
+        #message-box {
+            position: absolute;
+            top: 1rem;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.6);
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            opacity: 0;
+            transition: opacity 0.5s ease-in-out;
+            z-index: 1001;
+            pointer-events: none;
+        }
+        .controls-info {
+            position: absolute;
+            bottom: 1rem;
+            left: 1rem;
+            color: white;
+            background-color: rgba(0, 0, 0, 0.6);
+            padding: 1rem;
+            border-radius: 0.5rem;
+            font-size: 0.875rem;
+            line-height: 1.5;
+            text-align: left;
+            z-index: 100;
+        }
+        .controls-info ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-container">
+        <div id="pre-game-menu" class="ui-box max-w-lg w-full">
+            <h1 class="text-3xl font-bold mb-6">Driving Simulator</h1>
+            <div class="mb-4 text-left">
+                <label for="vehicle-select" class="label block mb-2">Select Vehicle:</label>
+                <select id="vehicle-select" class="select w-full">
+                    <option value="sedan">Sedan</option>
+                    <option value="suv">SUV</option>
+                    <option value="hatchback">Hatchback</option>
+                    <option value="truck">Truck</option>
+                    <option value="bus">Bus</option>
+                    <option value="bike">Motorcycle</option>
+                </select>
+            </div>
+            <div class="mb-4 text-left">
+                <label for="location-select" class="label block mb-2">Select Location:</label>
+                <select id="location-select" class="select w-full">
+                    <option value="city">City</option>
+                    <option value="hills">Hills</option>
+                    <option value="forest">Forest</option>
+                    <option value="desert">Desert</option>
+                </select>
+            </div>
+            <div class="mb-6 text-left">
+                <label for="road-type-select" class="label block mb-2">Select Road Type:</label>
+                <select id="road-type-select" class="select w-full">
+                    <option value="straight">Straight</option>
+                    <option value="bending">Bending</option>
+                    <option value="curves">Curves</option>
+                </select>
+            </div>
+            <button id="start-game-btn" class="btn w-full">Start Game</button>
+        </div>
+    </div>
+
+    <div id="message-box"></div>
+    <div class="controls-info">
+        <ul>
+            <li>**W/S** to accelerate/brake</li>
+            <li>**A/D** to steer left/right</li>
+            <li>**Space** for hard brake</li>
+            <li>**C** to change camera view</li>
+            <li>**E** to change weather</li>
+            <li>**F** to toggle autodrive</li>
+        </ul>
+    </div>
+
+    <!-- Three.js and Cannon.js Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.min.js"></script>
+
+    <script>
+        window.onload = function () {
+            // --- Global Variables ---
+            let scene, camera, renderer, world, clock, vehicle, controls;
+            let cameraViews = [];
+            let currentCameraView = 0;
+            let weatherTypes = ['sunny', 'rainy', 'snowy', 'night', 'autumn'];
+            let currentWeather = 0;
+            let autodrive = false;
+            let roadCurve = 0;
+            const ui = {
+                menu: document.getElementById('pre-game-menu'),
+                container: document.getElementById('ui-container'),
+                vehicleSelect: document.getElementById('vehicle-select'),
+                locationSelect: document.getElementById('location-select'),
+                roadTypeSelect: document.getElementById('road-type-select'),
+                startButton: document.getElementById('start-game-btn'),
+                messageBox: document.getElementById('message-box')
+            };
+            
+            // Braking force will be a percentage of the vehicle's normal brake force
+            const brakingForceMultiplier = {
+                sunny: 1.0,
+                rainy: 0.5,
+                snowy: 0.2,
+                night: 0.8,
+                autumn: 0.9
+            };
+
+            const vehicleSpecs = {
+                sedan: { mass: 1500, motorForce: 500, brakeForce: 100, maxSteer: Math.PI / 8, wheelRadius: 0.35, carBody: [2.5, 1.2, 5], wheelPositions: [[-1.2, -0.6, 2], [1.2, -0.6, 2], [-1.2, -0.6, -2], [1.2, -0.6, -2]], color: 0x0000ff },
+                suv: { mass: 2000, motorForce: 650, brakeForce: 120, maxSteer: Math.PI / 10, wheelRadius: 0.45, carBody: [2.8, 1.8, 5.5], wheelPositions: [[-1.3, -0.9, 2.5], [1.3, -0.9, 2.5], [-1.3, -0.9, -2.5], [1.3, -0.9, -2.5]], color: 0x556b2f },
+                hatchback: { mass: 1200, motorForce: 450, brakeForce: 90, maxSteer: Math.PI / 7, wheelRadius: 0.3, carBody: [2.3, 1.1, 4], wheelPositions: [[-1.1, -0.5, 1.5], [1.1, -0.5, 1.5], [-1.1, -0.5, -1.5], [1.1, -0.5, -1.5]], color: 0xff0000 },
+                truck: { mass: 5000, motorForce: 800, brakeForce: 200, maxSteer: Math.PI / 12, wheelRadius: 0.6, carBody: [3.5, 2.5, 8], wheelPositions: [[-1.5, -1.2, 3], [1.5, -1.2, 3], [-1.5, -1.2, -3], [1.5, -1.2, -3]], color: 0x8b4513 },
+                bus: { mass: 6000, motorForce: 750, brakeForce: 250, maxSteer: Math.PI / 12, wheelRadius: 0.7, carBody: [3.5, 3, 12], wheelPositions: [[-1.5, -1.5, 4], [1.5, -1.5, 4], [-1.5, -1.5, -4], [1.5, -1.5, -4]], color: 0x4682b4 },
+                bike: { mass: 300, motorForce: 300, brakeForce: 80, maxSteer: Math.PI / 5, wheelRadius: 0.3, carBody: [0.5, 0.8, 2], wheelPositions: [[0, -0.4, 0.8], [0, -0.4, -0.8]], color: 0xffff00 }
+            };
+
+            // --- Game Setup Functions ---
+            function init() {
+                // Scene setup
+                scene = new THREE.Scene();
+                scene.background = new THREE.Color(0x87ceeb); // Sky blue
+                
+                // Physics world setup
+                world = new CANNON.World();
+                world.gravity.set(0, -9.82, 0);
+                world.broadphase = new CANNON.NaiveBroadphase();
+                world.solver.iterations = 10;
+
+                // Renderer setup
+                renderer = new THREE.WebGLRenderer({ antialias: true });
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                renderer.shadowMap.enabled = true;
+                renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+                document.body.appendChild(renderer.domElement);
+
+                // Clock for animation
+                clock = new THREE.Clock();
+
+                // Start physics and game logic after user selection
+                ui.startButton.addEventListener('click', startGame);
+
+                // Handle window resize
+                window.addEventListener('resize', onWindowResize, false);
+            }
+
+            function startGame() {
+                const vehicleType = ui.vehicleSelect.value;
+                const locationType = ui.locationSelect.value;
+                const roadType = ui.roadTypeSelect.value;
+
+                ui.container.style.opacity = '0';
+                setTimeout(() => ui.container.style.display = 'none', 500);
+
+                // Create lights
+                createLights();
+
+                // Create the road and terrain
+                createRoadAndTerrain(locationType, roadType);
+                
+                // Create the car and physics
+                createVehicle(vehicleType);
+
+                // Set up cameras
+                setupCameras();
+
+                // Setup user controls
+                setupControls();
+
+                // Setup audio context
+                Tone.start();
+
+                // Start the animation loop
+                animate();
+            }
+
+            // --- 3D & Physics Object Creation ---
+            function createLights() {
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+                scene.add(ambientLight);
+                
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                directionalLight.position.set(20, 50, 10);
+                directionalLight.castShadow = true;
+                directionalLight.shadow.mapSize.width = 2048;
+                directionalLight.shadow.mapSize.height = 2048;
+                directionalLight.shadow.camera.near = 0.5;
+                directionalLight.shadow.camera.far = 100;
+                directionalLight.shadow.camera.left = -50;
+                directionalLight.shadow.camera.right = 50;
+                directionalLight.shadow.camera.top = 50;
+                directionalLight.shadow.camera.bottom = -50;
+                scene.add(directionalLight);
+            }
+
+            function createVehicle(type) {
+                const spec = vehicleSpecs[type];
+
+                // Create a simple car body mesh
+                const carBodyMesh = new THREE.Mesh(
+                    new THREE.BoxGeometry(spec.carBody[0], spec.carBody[1], spec.carBody[2]),
+                    new THREE.MeshStandardMaterial({ color: spec.color, metalness: 0.8, roughness: 0.3 })
+                );
+                carBodyMesh.position.set(0, 0, 0);
+                carBodyMesh.castShadow = true;
+                scene.add(carBodyMesh);
+
+                // Create a car body in Cannon.js
+                const carBodyShape = new CANNON.Box(new CANNON.Vec3(spec.carBody[0] / 2, spec.carBody[1] / 2, spec.carBody[2] / 2));
+                const carBody = new CANNON.Body({ mass: spec.mass });
+                carBody.addShape(carBodyShape);
+                carBody.position.set(0, 1, 0); // Start slightly above the ground
+                world.addBody(carBody);
+
+                // Create the vehicle chassis and wheels
+                const chassisBody = new CANNON.Body({ mass: spec.mass });
+                chassisBody.addShape(carBodyShape);
+                chassisBody.position.copy(carBody.position);
+                world.addBody(chassisBody);
+
+                // Vehicle specific properties
+                const vehicle = new CANNON.RigidVehicle({ chassisBody: chassisBody });
+
+                spec.wheelPositions.forEach(pos => {
+                    const wheelBody = new CANNON.Body({ mass: 1, type: CANNON.Body.KINEMATIC });
+                    const wheelShape = new CANNON.Cylinder(spec.wheelRadius, spec.wheelRadius, 0.2, 20);
+                    wheelBody.addShape(wheelShape);
+                    vehicle.addWheel({
+                        body: wheelBody,
+                        axis: new CANNON.Vec3(0, 1, 0),
+                        direction: new CANNON.Vec3(0, -1, 0),
+                        position: new CANNON.Vec3(pos[0], pos[1], pos[2])
+                    });
+                    scene.add(new THREE.Mesh(
+                        new THREE.CylinderGeometry(spec.wheelRadius, spec.wheelRadius, 0.2, 20),
+                        new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.8, roughness: 0.5 })
+                    ));
+                });
+                
+                vehicle.addToWorld(world);
+
+                // Store vehicle data in a global object
+                window.vehicle = {
+                    body: carBody,
+                    mesh: carBodyMesh,
+                    chassis: vehicle,
+                    specs: spec,
+                    wheels: []
+                };
+
+                // Add wheel meshes
+                for (let i = 0; i < vehicle.wheelBodies.length; i++) {
+                    const wheelMesh = new THREE.Mesh(
+                        new THREE.CylinderGeometry(spec.wheelRadius, spec.wheelRadius, 0.2, 20),
+                        new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.8, roughness: 0.5 })
+                    );
+                    wheelMesh.rotation.x = Math.PI / 2;
+                    wheelMesh.castShadow = true;
+                    scene.add(wheelMesh);
+                    window.vehicle.wheels.push(wheelMesh);
+                }
+            }
+
+            function createRoadAndTerrain(location, roadType) {
+                // Road parameters
+                const roadWidth = 10;
+                const roadColor = 0x555555;
+                const roadLength = 500;
+                const roadThickness = 0.2;
+
+                const groundColorMap = {
+                    city: 0x777777,
+                    hills: 0x228b22,
+                    forest: 0x228b22,
+                    desert: 0xf4a460
+                };
+                const groundColor = groundColorMap[location];
+                const terrainGeom = new THREE.BoxGeometry(200, 1, roadLength * 2);
+                const terrainMat = new THREE.MeshStandardMaterial({ color: groundColor });
+                const terrainMesh = new THREE.Mesh(terrainGeom, terrainMat);
+                terrainMesh.position.y = -0.5;
+                terrainMesh.receiveShadow = true;
+                scene.add(terrainMesh);
+
+                const groundShape = new CANNON.Box(new CANNON.Vec3(100, 0.5, roadLength));
+                const groundBody = new CANNON.Body({ mass: 0 });
+                groundBody.addShape(groundShape);
+                groundBody.position.y = -0.5;
+                world.addBody(groundBody);
+
+                // Road generation
+                let roadZ = -roadLength / 2;
+                let roadX = 0;
+                let roadDirection = 0;
+                let roadPoint = 0;
+
+                while (roadZ < roadLength / 2) {
+                    const roadMesh = new THREE.Mesh(
+                        new THREE.BoxGeometry(roadWidth, roadThickness, 10),
+                        new THREE.MeshStandardMaterial({ color: roadColor })
+                    );
+                    roadMesh.position.set(roadX, 0.1, roadZ);
+                    roadMesh.receiveShadow = true;
+                    scene.add(roadMesh);
+
+                    const roadBody = new CANNON.Body({ mass: 0 });
+                    roadBody.addShape(new CANNON.Box(new CANNON.Vec3(roadWidth / 2, roadThickness / 2, 5)));
+                    roadBody.position.set(roadX, 0.1, roadZ);
+                    world.addBody(roadBody);
+
+                    roadZ += 10;
+                    if (roadType === 'bending' && roadPoint % 5 === 0) {
+                        roadDirection += (Math.random() - 0.5) * 0.5;
+                        roadDirection = Math.max(-1, Math.min(1, roadDirection));
+                        roadCurve = roadDirection * 0.05;
+                    }
+                    if (roadType === 'curves') {
+                        roadDirection += (Math.random() - 0.5) * 0.5;
+                        roadDirection = Math.max(-1.5, Math.min(1.5, roadDirection));
+                        roadCurve = roadDirection * 0.1;
+                    }
+
+                    roadX += roadCurve * 10;
+                    roadPoint++;
+                }
+
+                // Add scenery based on location
+                const scenery = {
+                    forest: { count: 100, color: 0x334d28 },
+                    desert: { count: 50, color: 0x8b4513 },
+                    city: { count: 30, color: 0x808080 },
+                    hills: { count: 70, color: 0x483c32 }
+                };
+                if (scenery[location]) {
+                    for (let i = 0; i < scenery[location].count; i++) {
+                        const objectMesh = new THREE.Mesh(
+                            new THREE.BoxGeometry(2, 5, 2),
+                            new THREE.MeshStandardMaterial({ color: scenery[location].color })
+                        );
+                        objectMesh.position.x = (Math.random() > 0.5 ? -1 : 1) * (15 + Math.random() * 80);
+                        objectMesh.position.y = 2.5;
+                        objectMesh.position.z = -roadLength / 2 + Math.random() * roadLength;
+                        objectMesh.castShadow = true;
+                        scene.add(objectMesh);
+                    }
+                }
+            }
+
+            function setupCameras() {
+                // Third person camera
+                const thirdPersonCamera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+                thirdPersonCamera.position.set(0, 5, -10);
+                thirdPersonCamera.lookAt(window.vehicle.mesh.position);
+                cameraViews.push(thirdPersonCamera);
+
+                // Hood cam
+                const hoodCamera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+                hoodCamera.position.set(0, 1.5, 2);
+                hoodCamera.lookAt(0, 1.5, 10);
+                cameraViews.push(hoodCamera);
+
+                // Top-down view
+                const topDownCamera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+                topDownCamera.position.set(0, 30, 0);
+                topDownCamera.lookAt(0, 0, 0);
+                cameraViews.push(topDownCamera);
+
+                camera = cameraViews[currentCameraView];
+                scene.add(camera);
+            }
+
+            // --- Game Logic and Interaction ---
+            function setupControls() {
+                controls = {
+                    forward: false,
+                    backward: false,
+                    left: false,
+                    right: false,
+                    brake: false // New brake control
+                };
+                document.addEventListener('keydown', (event) => {
+                    switch (event.key) {
+                        case 'w': case 'W': controls.forward = true; break;
+                        case 's': case 'S': controls.backward = true; break;
+                        case 'a': case 'A': controls.left = true; break;
+                        case 'd': case 'D': controls.right = true; break;
+                        case ' ': controls.brake = true; break; // Space key for brake
+                        case 'c': case 'C': changeCamera(); break;
+                        case 'e': case 'E': changeWeather(); break;
+                        case 'f': case 'F': toggleAutodrive(); break;
+                    }
+                });
+                document.addEventListener('keyup', (event) => {
+                    switch (event.key) {
+                        case 'w': case 'W': controls.forward = false; break;
+                        case 's': case 'S': controls.backward = false; break;
+                        case 'a': case 'A': controls.left = false; break;
+                        case 'd': case 'D': controls.right = false; break;
+                        case ' ': controls.brake = false; break; // Release brake
+                    }
+                });
+            }
+
+            function showMessage(text) {
+                ui.messageBox.textContent = text;
+                ui.messageBox.style.opacity = '1';
+                setTimeout(() => {
+                    ui.messageBox.style.opacity = '0';
+                }, 2000);
+            }
+
+            function changeCamera() {
+                currentCameraView = (currentCameraView + 1) % cameraViews.length;
+                camera = cameraViews[currentCameraView];
+                showMessage(`Camera changed to view ${currentCameraView + 1}`);
+            }
+
+            function changeWeather() {
+                currentWeather = (currentWeather + 1) % weatherTypes.length;
+                const weather = weatherTypes[currentWeather];
+                showMessage(`Weather changed to ${weather}`);
+                updateWeather(weather);
+            }
+            
+            let rainParticles = [];
+            let snowParticles = [];
+            let ambientSounds = {};
+
+            function createAudioForWeather() {
+                // Wind sound
+                ambientSounds.wind = new Tone.Noise("white").toDestination();
+                ambientSounds.wind.volume.value = -20;
+                
+                // Rain sound
+                ambientSounds.rain = new Tone.MetalSynth({
+                    frequency: 200,
+                    envelope: {
+                        attack: 0.001,
+                        decay: 0.1,
+                        sustain: 0.05,
+                        release: 0.1
+                    },
+                    harmonicity: 3.1,
+                    modulationIndex: 10,
+                    resonance: 400,
+                    octaves: 1.5
+                }).toDestination();
+                ambientSounds.rain.volume.value = -15;
+
+                // Snowy/Autumn ambiance
+                ambientSounds.ambiance = new Tone.Panner3D().toDestination();
+                const ambienceSource = new Tone.BufferSource().connect(ambientSounds.ambiance);
+                
+                // Engine sound
+                ambientSounds.engine = new Tone.Oscillator(50, "sine").toDestination();
+                ambientSounds.engine.volume.value = -30;
+                ambientSounds.engine.start();
+            }
+
+            function updateWeather(weather) {
+                // Stop all ambient effects first
+                scene.children.filter(obj => obj.name === 'weather-effect').forEach(obj => scene.remove(obj));
+                rainParticles = [];
+                snowParticles = [];
+
+                if (ambientSounds.wind) ambientSounds.wind.stop();
+                if (ambientSounds.rain) ambientSounds.rain.stop();
+
+                switch(weather) {
+                    case 'rainy':
+                        scene.background = new THREE.Color(0x5a5a5a);
+                        scene.fog = new THREE.Fog(0x5a5a5a, 50, 150);
+                        const rainGeometry = new THREE.BufferGeometry();
+                        const rainVertices = [];
+                        for (let i = 0; i < 5000; i++) {
+                            rainVertices.push(Math.random() * 200 - 100);
+                            rainVertices.push(Math.random() * 200 + 50);
+                            rainVertices.push(Math.random() * 200 - 100);
+                        }
+                        rainGeometry.setAttribute('position', new THREE.Float32BufferAttribute(rainVertices, 3));
+                        const rainMaterial = new THREE.PointsMaterial({ color: 0xaaaaaa, size: 0.5 });
+                        rainParticles = new THREE.Points(rainGeometry, rainMaterial);
+                        rainParticles.name = 'weather-effect';
+                        scene.add(rainParticles);
+                        
+                        // Audio: Rain and a bit of wind
+                        if(ambientSounds.wind) ambientSounds.wind.start();
+                        if(ambientSounds.rain) ambientSounds.rain.triggerAttackRelease("1n");
+                        break;
+                    case 'snowy':
+                        scene.background = new THREE.Color(0xbbddff);
+                        scene.fog = new THREE.Fog(0xbbddff, 50, 150);
+                        const snowGeometry = new THREE.BufferGeometry();
+                        const snowVertices = [];
+                        for (let i = 0; i < 5000; i++) {
+                            snowVertices.push(Math.random() * 200 - 100);
+                            snowVertices.push(Math.random() * 200 + 50);
+                            snowVertices.push(Math.random() * 200 - 100);
+                        }
+                        snowGeometry.setAttribute('position', new THREE.Float32BufferAttribute(snowVertices, 3));
+                        const snowMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 0.8 });
+                        snowParticles = new THREE.Points(snowGeometry, snowMaterial);
+                        snowParticles.name = 'weather-effect';
+                        scene.add(snowParticles);
+                        // Audio: Only wind sound
+                        if(ambientSounds.wind) ambientSounds.wind.start();
+                        break;
+                    case 'night':
+                        scene.background = new THREE.Color(0x000033);
+                        scene.fog = new THREE.Fog(0x000033, 50, 150);
+                        break;
+                    case 'autumn':
+                        scene.background = new THREE.Color(0xd2b48c);
+                        scene.fog = new THREE.Fog(0xd2b48c, 50, 150);
+                        break;
+                    case 'sunny':
+                    default:
+                        scene.background = new THREE.Color(0x87ceeb);
+                        scene.fog = null;
+                        break;
+                }
+            }
+            
+            function toggleAutodrive() {
+                autodrive = !autodrive;
+                showMessage(autodrive ? "Autodrive ON" : "Autodrive OFF");
+            }
+
+            function update() {
+                const spec = window.vehicle.specs;
+                const chassis = window.vehicle.chassis;
+
+                if (!autodrive) {
+                    if (controls.forward) {
+                        chassis.setMotorForce(spec.motorForce, 2);
+                        chassis.setMotorForce(spec.motorForce, 3);
+                        chassis.setBrake(0, 0);
+                        chassis.setBrake(0, 1);
+                    } else if (controls.backward) {
+                        chassis.setMotorForce(-spec.motorForce, 2);
+                        chassis.setMotorForce(-spec.motorForce, 3);
+                        chassis.setBrake(0, 0);
+                        chassis.setBrake(0, 1);
+                    } else if (controls.brake) {
+                        // Apply braking force based on weather condition
+                        const brakeForce = spec.brakeForce * brakingForceMultiplier[weatherTypes[currentWeather]];
+                        chassis.setBrake(brakeForce, 0);
+                        chassis.setBrake(brakeForce, 1);
+                        chassis.setBrake(brakeForce, 2);
+                        chassis.setBrake(brakeForce, 3);
+                        chassis.setMotorForce(0, 2);
+                        chassis.setMotorForce(0, 3);
+                    } else {
+                        chassis.setMotorForce(0, 2);
+                        chassis.setMotorForce(0, 3);
+                        chassis.setBrake(0, 0);
+                        chassis.setBrake(0, 1);
+                    }
+                    if (controls.left) {
+                        chassis.setSteeringValue(spec.maxSteer, 0);
+                        chassis.setSteeringValue(spec.maxSteer, 1);
+                    } else if (controls.right) {
+                        chassis.setSteeringValue(-spec.maxSteer, 0);
+                        chassis.setSteeringValue(-spec.maxSteer, 1);
+                    } else {
+                        chassis.setSteeringValue(0, 0);
+                        chassis.setSteeringValue(0, 1);
+                    }
+                } else {
+                    // Simple autodrive logic: just keep driving forward
+                    chassis.setMotorForce(spec.motorForce, 2);
+                    chassis.setMotorForce(spec.motorForce, 3);
+                    chassis.setBrake(0, 0);
+                    chassis.setBrake(0, 1);
+                    chassis.setSteeringValue(roadCurve * 5, 0);
+                    chassis.setSteeringValue(roadCurve * 5, 1);
+                }
+
+                // Update wheel visuals
+                for (let i = 0; i < chassis.wheelBodies.length; i++) {
+                    chassis.updateWheelTransform(i);
+                    window.vehicle.wheels[i].position.copy(chassis.wheelBodies[i].position);
+                    window.vehicle.wheels[i].quaternion.copy(chassis.wheelBodies[i].quaternion);
+                }
+
+                // Update vehicle body visual
+                window.vehicle.mesh.position.copy(chassis.chassisBody.position);
+                window.vehicle.mesh.quaternion.copy(chassis.chassisBody.quaternion);
+
+                // Update camera position based on current view
+                const carPosition = window.vehicle.mesh.position;
+                const carRotation = window.vehicle.mesh.quaternion;
+                const carDirection = new THREE.Vector3(0, 0, 1).applyQuaternion(carRotation);
+
+                if (currentCameraView === 0) { // Third person
+                    const cameraOffset = new THREE.Vector3(0, 5, -10);
+                    cameraOffset.applyQuaternion(carRotation);
+                    camera.position.copy(carPosition).add(cameraOffset);
+                    camera.lookAt(carPosition.x, carPosition.y + 1, carPosition.z);
+                } else if (currentCameraView === 1) { // Hood cam
+                    const cameraOffset = new THREE.Vector3(0, 1.5, 2);
+                    cameraOffset.applyQuaternion(carRotation);
+                    camera.position.copy(carPosition).add(cameraOffset);
+                    const lookAtPoint = carPosition.clone().add(carDirection.multiplyScalar(10));
+                    camera.lookAt(lookAtPoint.x, carPosition.y + 1.5, lookAtPoint.z);
+                } else if (currentCameraView === 2) { // Top-down
+                    camera.position.set(carPosition.x, carPosition.y + 30, carPosition.z);
+                    camera.lookAt(carPosition);
+                }
+                
+                // Update particles for weather effects
+                if (rainParticles.length > 0) {
+                    const positions = rainParticles.geometry.attributes.position.array;
+                    for (let i = 1; i < positions.length; i += 3) {
+                        positions[i] -= 1; // Fall speed
+                        if (positions[i] < carPosition.y) {
+                            positions[i] = carPosition.y + 100;
+                        }
+                    }
+                    rainParticles.geometry.attributes.position.needsUpdate = true;
+                }
+                if (snowParticles.length > 0) {
+                     const positions = snowParticles.geometry.attributes.position.array;
+                    for (let i = 1; i < positions.length; i += 3) {
+                        positions[i] -= 0.5; // Fall speed
+                        positions[i-1] += Math.sin(positions[i+2]) * 0.1; // gentle sway
+                        if (positions[i] < carPosition.y) {
+                            positions[i] = carPosition.y + 100;
+                        }
+                    }
+                    snowParticles.geometry.attributes.position.needsUpdate = true;
+                }
+
+                // Update engine sound pitch based on speed
+                if (ambientSounds.engine) {
+                    const speed = window.vehicle.body.velocity.length();
+                    const frequency = 50 + speed * 10;
+                    ambientSounds.engine.frequency.value = frequency;
+                }
+            }
+
+            function animate() {
+                requestAnimationFrame(animate);
+
+                const deltaTime = clock.getDelta();
+                if (world) {
+                    world.step(1 / 60, deltaTime, 3);
+                    update();
+                }
+
+                if (renderer && scene && camera) {
+                    renderer.render(scene, camera);
+                }
+            }
+
+            function onWindowResize() {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+
+            // Start the initialization
+            init();
+            createAudioForWeather();
+        };
+    </script>
+</body>
+</html>
