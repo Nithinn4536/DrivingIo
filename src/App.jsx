@@ -1,3 +1,16 @@
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App.jsx';
+// The import for a global CSS file has been removed as it was causing a build error
+// import './index.css'; 
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+);
+```{react}
+// File: driving-simulator/src/App.jsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
@@ -686,7 +699,7 @@ function App() {
                         <div className="mb-6 text-left">
                             <label htmlFor="road-type-select" className="label block mb-2">Select Road Type:</label>
                             <select id="road-type-select" className="select w-full" value={selectedRoadType} onChange={e => setSelectedRoadType(e.target.value)}>
-                                {ROAD_OPTIONS.map(opt => <option key={opt={opt.value}} value={opt.value}>{opt.label}</option>)}
+                                {ROAD_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
                             </select>
                         </div>
                         <button className="btn w-full" onClick={() => setIsGameStarted(true)}>Start Game</button>
