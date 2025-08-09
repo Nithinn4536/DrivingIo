@@ -1,9 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as THREE from 'three';
-import * as CANNON from 'cannon-es'; // Using the modern physics engine
+import * as CANNON from 'cannon-es';
 import * as Tone from 'tone';
 
-// This is a stand-in for a `vehicles.json` file.
 const VEHICLE_SPECS = {
     sedan: { mass: 1500, motorForce: 500, brakeForce: 100, maxSteer: Math.PI / 8, wheelRadius: 0.35, carBody: [2.5, 1.2, 5], wheelPositions: [[-1.2, -0.6, 2], [1.2, -0.6, 2], [-1.2, -0.6, -2], [1.2, -0.6, -2]], color: 0x0000ff },
     suv: { mass: 2000, motorForce: 650, brakeForce: 120, maxSteer: Math.PI / 10, wheelRadius: 0.45, carBody: [2.8, 1.8, 5.5], wheelPositions: [[-1.3, -0.9, 2.5], [1.3, -0.9, 2.5], [-1.3, -0.9, -2.5], [1.3, -0.9, -2.5]], color: 0x556b2f },
@@ -23,7 +22,6 @@ const BRAKING_FORCE_MULTIPLIER = {
 
 const weatherTypes = ['sunny', 'rainy', 'snowy', 'night', 'autumn'];
 
-// All styles are defined here using JavaScript's template literals.
 const customStyles = `
     body {
         margin: 0;
@@ -139,7 +137,6 @@ const ROAD_OPTIONS = [
 ];
 
 function App() {
-    // State to manage game flow and settings
     const [isGameStarted, setIsGameStarted] = useState(false);
     const [selectedVehicle, setSelectedVehicle] = useState('sedan');
     const [selectedLocation, setSelectedLocation] = useState('city');
@@ -149,7 +146,6 @@ function App() {
     const [message, setMessage] = useState('');
     const [isMessageVisible, setIsMessageVisible] = useState(false);
 
-    // Refs for Three.js and Cannon.js objects
     const canvasRef = useRef(null);
     const sceneRef = useRef(null);
     const worldRef = useRef(null);
@@ -173,55 +169,147 @@ function App() {
         }, 2000);
     };
 
-    // Main game logic hook
+    // Moved these functions outside of useEffect so they can be referenced
+    // by other functions and event listeners correctly.
+    const createAudioForWeather = useCallback(() => {
+        ambientSoundsRef.current.wind = new Tone.Noise("white").toDestination();
+        ambientSoundsRef.current.wind.volume.value = -20;
+        ambientSoundsRef.current.rain = new Tone.MetalSynth({
+            frequency: 200,
+            envelope: { attack: 0.001, decay: 0.1, sustain: 0.05, release: 0.1 },
+            harmonicity: 3.1, modulationIndex: 10, resonance: 400, octaves: 1.5
+        }).toDestination();
+        ambientSoundsRef.current.rain.volume.value = -15;
+        ambientSoundsRef.current.engine = new Tone.Oscillator(50, "sine").toDestination();
+        ambientSoundsRef.current.engine.volume.value = -30;
+    }, []);
+
+    const updateWeather = useCallback((weather) => {
+        if (!sceneRef.current) return;
+        showMessage(`Weather changed to ${weather}`);
+        sceneRef.current.children.filter(obj => obj.name === 'weather-effect').forEach(obj => sceneRef.current.remove(obj));
+        
+        if (ambientSoundsRef.current.wind) ambientSoundsRef.current.wind.stop();
+        if (ambientSoundsRef.current.rain) ambientSoundsRef.current.rain.stop();
+        if (ambientSoundsRef.current.engine) ambientSoundsRef.current.engine.start();
+
+        let rainParticles = [];
+        let snowParticles = [];
+
+        switch(weather) {
+            case 'rainy':
+                sceneRef.current.background = new THREE.Color(0x5a5a5a);
+                sceneRef.current.fog = new THREE.Fog(0x5a5a5a, 50, 150);
+                const rainGeometry = new THREE.BufferGeometry();
+                const rainVertices = [];
+                for (let i = 0; i < 5000; i++) {
+                    rainVertices.push(Math.random() * 200 - 100);
+                    rainVertices.push(Math.random() * 200 + 50);
+                    rainVertices.push(Math.random() * 200 - 100);
+                }
+                rainGeometry.setAttribute('position', new THREE.Float32BufferAttribute(rainVertices, 3));
+                const rainMaterial = new THREE.PointsMaterial({ color: 0xaaaaaa, size: 0.5 });
+                rainParticles = new THREE.Points(rainGeometry, rainMaterial);
+                rainParticles.name = 'weather-effect';
+                sceneRef.current.add(rainParticles);
+                
+                if (ambientSoundsRef.current.wind) ambientSoundsRef.current.wind.start();
+                if (ambientSoundsRef.current.rain) ambientSoundsRef.current.rain.triggerAttackRelease("1n");
+                break;
+            case 'snowy':
+                sceneRef.current.background = new THREE.Color(0xbbddff);
+                sceneRef.current.fog = new THREE.Fog(0xbbddff, 50, 150);
+                const snowGeometry = new THREE.BufferGeometry();
+                const snowVertices = [];
+                for (let i = 0; i < 5000; i++) {
+                    snowVertices.push(Math.random() * 200 - 100);
+                    snowVertices.push(Math.random() * 200 + 50);
+                    snowVertices.push(Math.random() * 200 - 100);
+                }
+                snowGeometry.setAttribute('position', new THREE.Float32BufferAttribute(snowVertices, 3));
+                const snowMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 0.8 });
+                snowParticles = new THREE.Points(snowGeometry, snowMaterial);
+                snowParticles.name = 'weather-effect';
+                sceneRef.current.add(snowParticles);
+                if (ambientSoundsRef.current.wind) ambientSoundsRef.current.wind.start();
+                break;
+            case 'night':
+                sceneRef.current.background = new THREE.Color(0x000033);
+                sceneRef.current.fog = new THREE.Fog(0x000033, 50, 150);
+                break;
+            case 'autumn':
+                sceneRef.current.background = new THREE.Color(0xd2b48c);
+                sceneRef.current.fog = new THREE.Fog(0xd2b48c, 50, 150);
+                break;
+            case 'sunny':
+            default:
+                sceneRef.current.background = new THREE.Color(0x87ceeb);
+                sceneRef.current.fog = null;
+                break;
+        }
+    }, [showMessage]);
+
+    // This is the main game logic hook.
     useEffect(() => {
         if (!isGameStarted || !canvasRef.current) return;
+        
+        console.log('Game started, initializing...');
 
-        // --- Game Initialization ---
-        const init = () => {
-            // Scene setup
-            const newScene = new THREE.Scene();
-            newScene.background = new THREE.Color(0x87ceeb); // Sky blue
-            sceneRef.current = newScene;
-            
-            // Physics world setup
-            const newWorld = new CANNON.World();
-            newWorld.gravity.set(0, -9.82, 0);
-            newWorld.broadphase = new CANNON.NaiveBroadphase();
-            newWorld.solver.iterations = 10;
-            worldRef.current = newWorld;
-            
-            // Renderer setup
-            const newRenderer = new THREE.WebGLRenderer({ antialias: true, canvas: canvasRef.current });
-            newRenderer.setSize(window.innerWidth, window.innerHeight);
-            newRenderer.shadowMap.enabled = true;
-            newRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
-            rendererRef.current = newRenderer;
+        const init = async () => {
+            try {
+                // Scene setup
+                const newScene = new THREE.Scene();
+                sceneRef.current = newScene;
+                
+                // Physics world setup
+                const newWorld = new CANNON.World();
+                newWorld.gravity.set(0, -9.82, 0);
+                newWorld.broadphase = new CANNON.NaiveBroadphase();
+                newWorld.solver.iterations = 10;
+                worldRef.current = newWorld;
+                
+                // Renderer setup
+                const newRenderer = new THREE.WebGLRenderer({ antialias: true, canvas: canvasRef.current });
+                newRenderer.setSize(window.innerWidth, window.innerHeight);
+                newRenderer.shadowMap.enabled = true;
+                newRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
+                rendererRef.current = newRenderer;
 
-            // Clock for animation
-            clockRef.current = new THREE.Clock();
+                // Clock for animation
+                clockRef.current = new THREE.Clock();
 
-            // Create lights
-            createLights();
+                // Create lights
+                createLights();
 
-            // Create the road and terrain
-            createRoadAndTerrain(selectedLocation, selectedRoadType);
-            
-            // Create the car and physics using RaycastVehicle
-            createVehicle(selectedVehicle);
+                // Create the road and terrain
+                createRoadAndTerrain(selectedLocation, selectedRoadType);
+                
+                // Create the car and physics using RaycastVehicle
+                createVehicle(selectedVehicle);
 
-            // Set up cameras
-            setupCameras();
+                // Set up cameras
+                setupCameras();
 
-            // Setup user controls
-            setupControls();
-            
-            // Start audio context
-            Tone.start();
-            createAudioForWeather();
+                // Setup user controls
+                setupControls();
+                
+                // Start audio context after user interaction
+                try {
+                    await Tone.start();
+                    createAudioForWeather();
+                } catch (audioError) {
+                    console.error('Error starting audio:', audioError);
+                }
 
-            // Start the animation loop
-            animate();
+                // Initial weather update
+                updateWeather(weatherTypes[currentWeatherIndex]);
+
+                // Start the animation loop
+                animate();
+                console.log('Game initialized successfully.');
+            } catch (error) {
+                console.error('Error during game initialization:', error);
+            }
         };
 
         const createLights = () => {
@@ -245,7 +333,6 @@ function App() {
         const createVehicle = (type) => {
             const spec = VEHICLE_SPECS[type];
 
-            // Create the car body mesh
             const carBodyMesh = new THREE.Mesh(
                 new THREE.BoxGeometry(spec.carBody[0], spec.carBody[1], spec.carBody[2]),
                 new THREE.MeshStandardMaterial({ color: spec.color, metalness: 0.8, roughness: 0.3 })
@@ -253,19 +340,16 @@ function App() {
             carBodyMesh.castShadow = true;
             sceneRef.current.add(carBodyMesh);
 
-            // Create the car body physics body
             const carBodyShape = new CANNON.Box(new CANNON.Vec3(spec.carBody[0] / 2, spec.carBody[1] / 2, spec.carBody[2] / 2));
             const chassisBody = new CANNON.Body({ mass: spec.mass });
             chassisBody.addShape(carBodyShape);
             chassisBody.position.set(0, 1, 0);
             worldRef.current.addBody(chassisBody);
 
-            // Create the RaycastVehicle
             const vehicle = new CANNON.RaycastVehicle({
                 chassisBody: chassisBody,
             });
 
-            // Add the wheels
             const wheelMeshes = [];
             const wheelOptions = {
                 radius: spec.wheelRadius,
@@ -286,7 +370,6 @@ function App() {
                     chassisConnectionPoint: new CANNON.Vec3(pos[0], pos[1], pos[2])
                 });
                 
-                // Create the wheel mesh
                 const wheelMesh = new THREE.Mesh(
                     new THREE.CylinderGeometry(spec.wheelRadius, spec.wheelRadius, 0.2, 20),
                     new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.8, roughness: 0.5 })
@@ -339,6 +422,8 @@ function App() {
             let roadDirection = 0;
             let roadPoint = 0;
 
+            const roadGroup = new THREE.Group();
+
             while (roadZ < roadLength / 2) {
                 const roadMesh = new THREE.Mesh(
                     new THREE.BoxGeometry(roadWidth, roadThickness, 10),
@@ -346,7 +431,7 @@ function App() {
                 );
                 roadMesh.position.set(roadX, 0.1, roadZ);
                 roadMesh.receiveShadow = true;
-                sceneRef.current.add(roadMesh);
+                roadGroup.add(roadMesh);
 
                 const roadBody = new CANNON.Body({ mass: 0 });
                 roadBody.addShape(new CANNON.Box(new CANNON.Vec3(roadWidth / 2, roadThickness / 2, 5)));
@@ -354,20 +439,14 @@ function App() {
                 worldRef.current.addBody(roadBody);
 
                 roadZ += 10;
-                if (roadType === 'bending' && roadPoint % 5 === 0) {
-                    roadDirection += (Math.random() - 0.5) * 0.5;
-                    roadDirection = Math.max(-1, Math.min(1, roadDirection));
-                    roadCurveRef.current = roadDirection * 0.05;
+                if (roadType === 'bending' || roadType === 'curves') {
+                    roadDirection += (Math.random() - 0.5) * 0.2;
+                    roadDirection = Math.max(-0.5, Math.min(0.5, roadDirection));
+                    roadX += roadDirection * 10;
                 }
-                if (roadType === 'curves') {
-                    roadDirection += (Math.random() - 0.5) * 0.5;
-                    roadDirection = Math.max(-1.5, Math.min(1.5, roadDirection));
-                    roadCurveRef.current = roadDirection * 0.1;
-                }
-
-                roadX += roadCurveRef.current * 10;
                 roadPoint++;
             }
+            sceneRef.current.add(roadGroup);
         };
 
         const setupCameras = () => {
@@ -397,6 +476,21 @@ function App() {
                 forward: false, backward: false, left: false, right: false, brake: false
             };
             controlsRef.current = controls;
+
+            const changeCamera = () => {
+                currentCameraViewIndexRef.current = (currentCameraViewIndexRef.current + 1) % cameraViewsRef.current.length;
+                cameraRef.current = cameraViewsRef.current[currentCameraViewIndexRef.current];
+                showMessage(`Camera changed to view ${currentCameraViewIndexRef.current + 1}`);
+            };
+
+            const changeWeather = () => {
+                const nextWeatherIndex = (currentWeatherIndex + 1) % weatherTypes.length;
+                setCurrentWeatherIndex(nextWeatherIndex);
+            };
+            
+            const toggleAutodrive = () => {
+                setIsAutodriveOn(prev => !prev);
+            };
 
             const handleKeyDown = (event) => {
                 switch (event.key) {
@@ -430,111 +524,17 @@ function App() {
             };
         };
         
-        const changeCamera = () => {
-            currentCameraViewIndexRef.current = (currentCameraViewIndexRef.current + 1) % cameraViewsRef.current.length;
-            cameraRef.current = cameraViewsRef.current[currentCameraViewIndexRef.current];
-            showMessage(`Camera changed to view ${currentCameraViewIndexRef.current + 1}`);
-        };
-
-        const changeWeather = () => {
-            setCurrentWeatherIndex(prev => (prev + 1) % weatherTypes.length);
-        };
-        
-        const toggleAutodrive = () => {
-            setIsAutodriveOn(prev => !prev);
-        };
-        
-        const createAudioForWeather = () => {
-            ambientSoundsRef.current.wind = new Tone.Noise("white").toDestination();
-            ambientSoundsRef.current.wind.volume.value = -20;
-            ambientSoundsRef.current.rain = new Tone.MetalSynth({
-                frequency: 200,
-                envelope: { attack: 0.001, decay: 0.1, sustain: 0.05, release: 0.1 },
-                harmonicity: 3.1, modulationIndex: 10, resonance: 400, octaves: 1.5
-            }).toDestination();
-            ambientSoundsRef.current.rain.volume.value = -15;
-            ambientSoundsRef.current.engine = new Tone.Oscillator(50, "sine").toDestination();
-            ambientSoundsRef.current.engine.volume.value = -30;
-            ambientSoundsRef.current.engine.start();
-        };
-
-        const updateWeather = (weather) => {
-            showMessage(`Weather changed to ${weather}`);
-            sceneRef.current.children.filter(obj => obj.name === 'weather-effect').forEach(obj => sceneRef.current.remove(obj));
-            
-            if(ambientSoundsRef.current.wind) ambientSoundsRef.current.wind.stop();
-            if(ambientSoundsRef.current.rain) ambientSoundsRef.current.rain.stop();
-
-            let rainParticles = [];
-            let snowParticles = [];
-
-            switch(weather) {
-                case 'rainy':
-                    sceneRef.current.background = new THREE.Color(0x5a5a5a);
-                    sceneRef.current.fog = new THREE.Fog(0x5a5a5a, 50, 150);
-                    const rainGeometry = new THREE.BufferGeometry();
-                    const rainVertices = [];
-                    for (let i = 0; i < 5000; i++) {
-                        rainVertices.push(Math.random() * 200 - 100);
-                        rainVertices.push(Math.random() * 200 + 50);
-                        rainVertices.push(Math.random() * 200 - 100);
-                    }
-                    rainGeometry.setAttribute('position', new THREE.Float32BufferAttribute(rainVertices, 3));
-                    const rainMaterial = new THREE.PointsMaterial({ color: 0xaaaaaa, size: 0.5 });
-                    rainParticles = new THREE.Points(rainGeometry, rainMaterial);
-                    rainParticles.name = 'weather-effect';
-                    sceneRef.current.add(rainParticles);
-                    
-                    if(ambientSoundsRef.current.wind) ambientSoundsRef.current.wind.start();
-                    if(ambientSoundsRef.current.rain) ambientSoundsRef.current.rain.triggerAttackRelease("1n");
-                    break;
-                case 'snowy':
-                    sceneRef.current.background = new THREE.Color(0xbbddff);
-                    sceneRef.current.fog = new THREE.Fog(0xbbddff, 50, 150);
-                    const snowGeometry = new THREE.BufferGeometry();
-                    const snowVertices = [];
-                    for (let i = 0; i < 5000; i++) {
-                        snowVertices.push(Math.random() * 200 - 100);
-                        snowVertices.push(Math.random() * 200 + 50);
-                        snowVertices.push(Math.random() * 200 - 100);
-                    }
-                    snowGeometry.setAttribute('position', new THREE.Float32BufferAttribute(snowVertices, 3));
-                    const snowMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 0.8 });
-                    snowParticles = new THREE.Points(snowGeometry, snowMaterial);
-                    snowParticles.name = 'weather-effect';
-                    sceneRef.current.add(snowParticles);
-                    if(ambientSoundsRef.current.wind) ambientSoundsRef.current.wind.start();
-                    break;
-                case 'night':
-                    sceneRef.current.background = new THREE.Color(0x000033);
-                    sceneRef.current.fog = new THREE.Fog(0x000033, 50, 150);
-                    break;
-                case 'autumn':
-                    sceneRef.current.background = new THREE.Color(0xd2b48c);
-                    sceneRef.current.fog = new THREE.Fog(0xd2b48c, 50, 150);
-                    break;
-                case 'sunny':
-                default:
-                    sceneRef.current.background = new THREE.Color(0x87ceeb);
-                    sceneRef.current.fog = null;
-                    break;
-            }
-        };
-
         const updateGameLogic = () => {
             const spec = vehicleRef.current.specs;
             const vehicle = vehicleRef.current.cannonVehicle;
             
             const currentBrakingForce = spec.brakeForce * BRAKING_FORCE_MULTIPLIER[weatherTypes[currentWeatherIndex]];
             
-            // Steering
             const steerValue = controlsRef.current.left ? spec.maxSteer : controlsRef.current.right ? -spec.maxSteer : 0;
-            vehicle.setSteeringValue(steerValue, 0); // Front left wheel
-            vehicle.setSteeringValue(steerValue, 1); // Front right wheel
+            vehicle.setSteeringValue(steerValue, 0);
+            vehicle.setSteeringValue(steerValue, 1);
 
-            // Acceleration and Braking
             if (isAutodriveOn) {
-                // Autodrive logic
                 const carForward = vehicleRef.current.chassis.quaternion.vmult(new CANNON.Vec3(0, 0, 1));
                 const currentSpeed = vehicleRef.current.chassis.velocity.dot(carForward);
                 const targetSpeed = 20;
@@ -549,14 +549,12 @@ function App() {
                     vehicle.applyEngineForce(0, 2);
                     vehicle.applyEngineForce(0, 3);
                 }
-                // Simple steering for autodrive (follows a single curve)
                 vehicle.setSteeringValue(roadCurveRef.current * 5, 0);
                 vehicle.setSteeringValue(roadCurveRef.current * 5, 1);
             } else {
-                // Manual controls
                 if (controlsRef.current.forward) {
-                    vehicle.applyEngineForce(spec.motorForce, 2); // Rear left wheel
-                    vehicle.applyEngineForce(spec.motorForce, 3); // Rear right wheel
+                    vehicle.applyEngineForce(spec.motorForce, 2);
+                    vehicle.applyEngineForce(spec.motorForce, 3);
                 } else if (controlsRef.current.backward) {
                     vehicle.applyEngineForce(-spec.motorForce, 2);
                     vehicle.applyEngineForce(-spec.motorForce, 3);
@@ -578,7 +576,6 @@ function App() {
                 }
             }
 
-            // Update wheel meshes
             for (let i = 0; i < vehicle.wheelInfos.length; i++) {
                 vehicle.updateWheelTransform(i);
                 const wheel = vehicle.wheelInfos[i];
@@ -586,7 +583,6 @@ function App() {
                 vehicleRef.current.wheels[i].quaternion.copy(wheel.worldTransform.quaternion);
             }
 
-            // Update car body mesh
             vehicleRef.current.mesh.position.copy(vehicleRef.current.chassis.position);
             vehicleRef.current.mesh.quaternion.copy(vehicleRef.current.chassis.quaternion);
 
@@ -610,7 +606,6 @@ function App() {
                 cameraRef.current.lookAt(carPosition);
             }
 
-            // Update audio
             if (ambientSoundsRef.current.engine) {
                 const speed = vehicleRef.current.chassis.velocity.length();
                 ambientSoundsRef.current.engine.frequency.value = 50 + speed * 10;
@@ -618,37 +613,34 @@ function App() {
         };
 
         const animate = () => {
-            const deltaTime = clockRef.current.getDelta();
-            if (worldRef.current) {
-                worldRef.current.fixedStep(); // Use fixedStep for more stable physics
-                updateGameLogic();
+            try {
+                const deltaTime = clockRef.current.getDelta();
+                if (worldRef.current) {
+                    worldRef.current.fixedStep();
+                    updateGameLogic();
+                }
+                if (rendererRef.current && sceneRef.current && cameraRef.current) {
+                    rendererRef.current.render(sceneRef.current, cameraRef.current);
+                }
+                animateIdRef.current = requestAnimationFrame(animate);
+            } catch (error) {
+                console.error('Error in animation loop:', error);
             }
-            if (rendererRef.current && sceneRef.current && cameraRef.current) {
-                rendererRef.current.render(sceneRef.current, cameraRef.current);
-            }
-            animateIdRef.current = requestAnimationFrame(animate);
         };
         
         init();
         
-        // Cleanup function
         return () => {
             cancelAnimationFrame(animateIdRef.current);
             if (rendererRef.current) {
                 rendererRef.current.dispose();
-                rendererRef.current.domElement.remove();
             }
             if (worldRef.current) {
                 worldRef.current.bodies.forEach(body => worldRef.current.removeBody(body));
             }
-            if (Tone.Transport) {
-                Tone.Transport.stop();
-                Tone.Transport.cancel();
-            }
         };
-    }, [isGameStarted, selectedVehicle, selectedLocation, selectedRoadType]);
+    }, [isGameStarted, selectedVehicle, selectedLocation, selectedRoadType, createAudioForWeather, updateWeather, currentWeatherIndex, isAutodriveOn]);
 
-    // Hook to handle window resize
     useEffect(() => {
         const onWindowResize = () => {
             if (cameraRef.current && rendererRef.current) {
@@ -661,21 +653,17 @@ function App() {
         return () => window.removeEventListener('resize', onWindowResize);
     }, []);
 
-    // Hook to handle weather changes
-    useEffect(() => {
-        if (isGameStarted && sceneRef.current) {
-            updateWeather(weatherTypes[currentWeatherIndex]);
-        }
-    }, [currentWeatherIndex, isGameStarted]);
+    // Moved the weather update logic into the main useEffect to avoid a ReferenceError
+    // and to ensure it only runs once at the start. The weather change event listener
+    // now just updates the state, and the main useEffect handles the rendering.
     
     // Hook to handle autodrive changes
     useEffect(() => {
         if (isGameStarted) {
             showMessage(isAutodriveOn ? "Autodrive ON" : "Autodrive OFF");
         }
-    }, [isAutodriveOn, isGameStarted]);
+    }, [isAutodriveOn, isGameStarted, showMessage]);
 
-    // The component's rendered output
     return (
         <div style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden' }}>
             <style>{customStyles}</style>
@@ -698,7 +686,7 @@ function App() {
                         <div className="mb-6 text-left">
                             <label htmlFor="road-type-select" className="label block mb-2">Select Road Type:</label>
                             <select id="road-type-select" className="select w-full" value={selectedRoadType} onChange={e => setSelectedRoadType(e.target.value)}>
-                                {ROAD_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                                {ROAD_OPTIONS.map(opt => <option key={opt={opt.value}} value={opt.value}>{opt.label}</option>)}
                             </select>
                         </div>
                         <button className="btn w-full" onClick={() => setIsGameStarted(true)}>Start Game</button>
