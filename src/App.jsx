@@ -1,16 +1,3 @@
-import React from 'react';
-import ReactDOM from 'react-dom/client';
-import App from './App.jsx';
-// The import for a global CSS file has been removed as it was causing a build error
-// import './index.css'; 
-
-ReactDOM.createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-);
-```{react}
-// File: driving-simulator/src/App.jsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
@@ -34,102 +21,6 @@ const BRAKING_FORCE_MULTIPLIER = {
 };
 
 const weatherTypes = ['sunny', 'rainy', 'snowy', 'night', 'autumn'];
-
-const customStyles = `
-    body {
-        margin: 0;
-        overflow: hidden;
-        font-family: 'Inter', sans-serif;
-        background-color: #1a202c;
-    }
-    #root {
-        width: 100vw;
-        height: 100vh;
-        overflow: hidden;
-    }
-    canvas {
-        display: block;
-        width: 100vw;
-        height: 100vh;
-    }
-    #ui-container {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background-color: rgba(0, 0, 0, 0.7);
-        z-index: 1000;
-        transition: opacity 0.5s ease-in-out;
-    }
-    .ui-box {
-        background-color: #2d3748;
-        padding: 2.5rem;
-        border-radius: 1rem;
-        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-        color: #e2e8f0;
-        text-align: center;
-    }
-    .btn {
-        background-image: linear-gradient(to right, #4c51bf, #667eea);
-        padding: 0.75rem 2rem;
-        border-radius: 0.5rem;
-        font-weight: bold;
-        color: white;
-        cursor: pointer;
-        transition: transform 0.2s, box-shadow 0.2s;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-    }
-    .btn:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2), 0 4px 6px -2px rgba(0, 0, 0, 0.1);
-    }
-    .label {
-        color: #cbd5e0;
-        font-weight: 600;
-    }
-    .select {
-        background-color: #4a5568;
-        color: white;
-        border-radius: 0.5rem;
-        padding: 0.5rem;
-    }
-    #message-box {
-        position: absolute;
-        top: 1rem;
-        left: 50%;
-        transform: translateX(-50%);
-        background-color: rgba(0, 0, 0, 0.6);
-        color: white;
-        padding: 0.75rem 1.5rem;
-        border-radius: 0.5rem;
-        opacity: 0;
-        transition: opacity 0.5s ease-in-out;
-        z-index: 1001;
-        pointer-events: none;
-    }
-    .controls-info {
-        position: absolute;
-        bottom: 1rem;
-        left: 1rem;
-        color: white;
-        background-color: rgba(0, 0, 0, 0.6);
-        padding: 1rem;
-        border-radius: 0.5rem;
-        font-size: 0.875rem;
-        line-height: 1.5;
-        text-align: left;
-        z-index: 100;
-    }
-    .controls-info ul {
-        list-style: none;
-        padding: 0;
-        margin: 0;
-    }
-`;
 
 const VEHICLE_OPTIONS = Object.keys(VEHICLE_SPECS).map(key => ({
     value: key,
@@ -203,7 +94,7 @@ function App() {
         sceneRef.current.children.filter(obj => obj.name === 'weather-effect').forEach(obj => sceneRef.current.remove(obj));
         
         if (ambientSoundsRef.current.wind) ambientSoundsRef.current.wind.stop();
-        if (ambientSoundsRef.current.rain) ambientSoundsRef.current.rain.stop();
+        if (ambientSoundsRef.current.rain) ambientSoundsRef.current.rain.triggerRelease();
         if (ambientSoundsRef.current.engine) ambientSoundsRef.current.engine.start();
 
         let rainParticles = [];
@@ -679,7 +570,6 @@ function App() {
 
     return (
         <div style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden' }}>
-            <style>{customStyles}</style>
             {!isGameStarted ? (
                 <div id="ui-container" className="flex items-center justify-center">
                     <div className="ui-box max-w-lg w-full p-10">
