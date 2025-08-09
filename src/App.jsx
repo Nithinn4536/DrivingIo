@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as THREE from 'three';
-import * as CANNON from 'cannon';
+import * as CANNON from 'cannon-es'; // Using the modern physics engine
 import * as Tone from 'tone';
 
 // This is a stand-in for a `vehicles.json` file.
-// In a real project, this would be a separate file imported here.
 const VEHICLE_SPECS = {
     sedan: { mass: 1500, motorForce: 500, brakeForce: 100, maxSteer: Math.PI / 8, wheelRadius: 0.35, carBody: [2.5, 1.2, 5], wheelPositions: [[-1.2, -0.6, 2], [1.2, -0.6, 2], [-1.2, -0.6, -2], [1.2, -0.6, -2]], color: 0x0000ff },
     suv: { mass: 2000, motorForce: 650, brakeForce: 120, maxSteer: Math.PI / 10, wheelRadius: 0.45, carBody: [2.8, 1.8, 5.5], wheelPositions: [[-1.3, -0.9, 2.5], [1.3, -0.9, 2.5], [-1.3, -0.9, -2.5], [1.3, -0.9, -2.5]], color: 0x556b2f },
@@ -24,7 +23,6 @@ const BRAKING_FORCE_MULTIPLIER = {
 
 const weatherTypes = ['sunny', 'rainy', 'snowy', 'night', 'autumn'];
 
-// This is a stand-in for a `styles.css` file.
 // All styles are defined here using JavaScript's template literals.
 const customStyles = `
     body {
@@ -165,7 +163,7 @@ function App() {
     const roadCurveRef = useRef(0);
     const animateIdRef = useRef(null);
     const ambientSoundsRef = useRef({});
-
+    
     // Display a temporary message to the user
     const showMessage = (text) => {
         setMessage(text);
@@ -209,7 +207,7 @@ function App() {
             // Create the road and terrain
             createRoadAndTerrain(selectedLocation, selectedRoadType);
             
-            // Create the car and physics
+            // Create the car and physics using RaycastVehicle
             createVehicle(selectedVehicle);
 
             // Set up cameras
@@ -247,39 +245,48 @@ function App() {
         const createVehicle = (type) => {
             const spec = VEHICLE_SPECS[type];
 
+            // Create the car body mesh
             const carBodyMesh = new THREE.Mesh(
                 new THREE.BoxGeometry(spec.carBody[0], spec.carBody[1], spec.carBody[2]),
                 new THREE.MeshStandardMaterial({ color: spec.color, metalness: 0.8, roughness: 0.3 })
             );
-            carBodyMesh.position.set(0, 0, 0);
             carBodyMesh.castShadow = true;
             sceneRef.current.add(carBodyMesh);
 
+            // Create the car body physics body
             const carBodyShape = new CANNON.Box(new CANNON.Vec3(spec.carBody[0] / 2, spec.carBody[1] / 2, spec.carBody[2] / 2));
-            const carBody = new CANNON.Body({ mass: spec.mass });
-            carBody.addShape(carBodyShape);
-            carBody.position.set(0, 1, 0);
-            worldRef.current.addBody(carBody);
-
             const chassisBody = new CANNON.Body({ mass: spec.mass });
             chassisBody.addShape(carBodyShape);
-            chassisBody.position.copy(carBody.position);
+            chassisBody.position.set(0, 1, 0);
             worldRef.current.addBody(chassisBody);
 
-            const vehicle = new CANNON.RigidVehicle({ chassisBody: chassisBody });
+            // Create the RaycastVehicle
+            const vehicle = new CANNON.RaycastVehicle({
+                chassisBody: chassisBody,
+            });
 
+            // Add the wheels
             const wheelMeshes = [];
+            const wheelOptions = {
+                radius: spec.wheelRadius,
+                suspensionStiffness: 30,
+                suspensionRestLength: 0.3,
+                frictionSlip: 5,
+                dampingRelaxation: 2.3,
+                dampingCompression: 4.4,
+                maxSuspensionForce: 100000,
+                rollInfluence: 0.01,
+                maxSuspensionTravel: 0.3,
+                customSlidingRotationalSpeed: -30,
+            };
+
             spec.wheelPositions.forEach(pos => {
-                const wheelBody = new CANNON.Body({ mass: 1, type: CANNON.Body.KINEMATIC });
-                const wheelShape = new CANNON.Cylinder(spec.wheelRadius, spec.wheelRadius, 0.2, 20);
-                wheelBody.addShape(wheelShape);
                 vehicle.addWheel({
-                    body: wheelBody,
-                    axis: new CANNON.Vec3(0, 1, 0),
-                    direction: new CANNON.Vec3(0, -1, 0),
-                    position: new CANNON.Vec3(pos[0], pos[1], pos[2])
+                    ...wheelOptions,
+                    chassisConnectionPoint: new CANNON.Vec3(pos[0], pos[1], pos[2])
                 });
                 
+                // Create the wheel mesh
                 const wheelMesh = new THREE.Mesh(
                     new THREE.CylinderGeometry(spec.wheelRadius, spec.wheelRadius, 0.2, 20),
                     new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.8, roughness: 0.5 })
@@ -293,9 +300,9 @@ function App() {
             vehicle.addToWorld(worldRef.current);
 
             vehicleRef.current = {
-                body: carBody,
+                chassis: chassisBody,
                 mesh: carBodyMesh,
-                chassis: vehicle,
+                cannonVehicle: vehicle,
                 specs: spec,
                 wheels: wheelMeshes
             };
@@ -516,60 +523,72 @@ function App() {
 
         const updateGameLogic = () => {
             const spec = vehicleRef.current.specs;
-            const chassis = vehicleRef.current.chassis;
-
+            const vehicle = vehicleRef.current.cannonVehicle;
+            
             const currentBrakingForce = spec.brakeForce * BRAKING_FORCE_MULTIPLIER[weatherTypes[currentWeatherIndex]];
             
-            if (!isAutodriveOn) {
-                if (controlsRef.current.forward) {
-                    chassis.setMotorForce(spec.motorForce, 2);
-                    chassis.setMotorForce(spec.motorForce, 3);
-                    chassis.setBrake(0, 0);
-                    chassis.setBrake(0, 1);
-                } else if (controlsRef.current.backward) {
-                    chassis.setMotorForce(-spec.motorForce, 2);
-                    chassis.setMotorForce(-spec.motorForce, 3);
-                    chassis.setBrake(0, 0);
-                    chassis.setBrake(0, 1);
-                } else if (controlsRef.current.brake) {
-                    chassis.setBrake(currentBrakingForce, 0);
-                    chassis.setBrake(currentBrakingForce, 1);
-                    chassis.setBrake(currentBrakingForce, 2);
-                    chassis.setBrake(currentBrakingForce, 3);
-                    chassis.setMotorForce(0, 2);
-                    chassis.setMotorForce(0, 3);
+            // Steering
+            const steerValue = controlsRef.current.left ? spec.maxSteer : controlsRef.current.right ? -spec.maxSteer : 0;
+            vehicle.setSteeringValue(steerValue, 0); // Front left wheel
+            vehicle.setSteeringValue(steerValue, 1); // Front right wheel
+
+            // Acceleration and Braking
+            if (isAutodriveOn) {
+                // Autodrive logic
+                const carForward = vehicleRef.current.chassis.quaternion.vmult(new CANNON.Vec3(0, 0, 1));
+                const currentSpeed = vehicleRef.current.chassis.velocity.dot(carForward);
+                const targetSpeed = 20;
+
+                if (currentSpeed < targetSpeed) {
+                    vehicle.applyEngineForce(spec.motorForce, 2);
+                    vehicle.applyEngineForce(spec.motorForce, 3);
+                } else if (currentSpeed > targetSpeed) {
+                    vehicle.setBrake(spec.brakeForce, 2);
+                    vehicle.setBrake(spec.brakeForce, 3);
                 } else {
-                    chassis.setMotorForce(0, 2);
-                    chassis.setMotorForce(0, 3);
-                    chassis.setBrake(0, 0);
-                    chassis.setBrake(0, 1);
+                    vehicle.applyEngineForce(0, 2);
+                    vehicle.applyEngineForce(0, 3);
                 }
-                if (controlsRef.current.left) {
-                    chassis.setSteeringValue(spec.maxSteer, 0);
-                    chassis.setSteeringValue(spec.maxSteer, 1);
-                } else if (controlsRef.current.right) {
-                    chassis.setSteeringValue(-spec.maxSteer, 0);
-                    chassis.setSteeringValue(-spec.maxSteer, 1);
-                } else {
-                    chassis.setSteeringValue(0, 0);
-                    chassis.setSteeringValue(0, 1);
-                }
+                // Simple steering for autodrive (follows a single curve)
+                vehicle.setSteeringValue(roadCurveRef.current * 5, 0);
+                vehicle.setSteeringValue(roadCurveRef.current * 5, 1);
             } else {
-                chassis.setMotorForce(spec.motorForce, 2);
-                chassis.setMotorForce(spec.motorForce, 3);
-                chassis.setBrake(0, 0);
-                chassis.setBrake(0, 1);
-                chassis.setSteeringValue(roadCurveRef.current * 5, 0);
-                chassis.setSteeringValue(roadCurveRef.current * 5, 1);
+                // Manual controls
+                if (controlsRef.current.forward) {
+                    vehicle.applyEngineForce(spec.motorForce, 2); // Rear left wheel
+                    vehicle.applyEngineForce(spec.motorForce, 3); // Rear right wheel
+                } else if (controlsRef.current.backward) {
+                    vehicle.applyEngineForce(-spec.motorForce, 2);
+                    vehicle.applyEngineForce(-spec.motorForce, 3);
+                } else {
+                    vehicle.applyEngineForce(0, 2);
+                    vehicle.applyEngineForce(0, 3);
+                }
+                
+                if (controlsRef.current.brake) {
+                    vehicle.setBrake(currentBrakingForce, 0);
+                    vehicle.setBrake(currentBrakingForce, 1);
+                    vehicle.setBrake(currentBrakingForce, 2);
+                    vehicle.setBrake(currentBrakingForce, 3);
+                } else {
+                    vehicle.setBrake(0, 0);
+                    vehicle.setBrake(0, 1);
+                    vehicle.setBrake(0, 2);
+                    vehicle.setBrake(0, 3);
+                }
             }
 
-            for (let i = 0; i < chassis.wheelBodies.length; i++) {
-                chassis.updateWheelTransform(i);
-                vehicleRef.current.wheels[i].position.copy(chassis.wheelBodies[i].position);
-                vehicleRef.current.wheels[i].quaternion.copy(chassis.wheelBodies[i].quaternion);
+            // Update wheel meshes
+            for (let i = 0; i < vehicle.wheelInfos.length; i++) {
+                vehicle.updateWheelTransform(i);
+                const wheel = vehicle.wheelInfos[i];
+                vehicleRef.current.wheels[i].position.copy(wheel.worldTransform.position);
+                vehicleRef.current.wheels[i].quaternion.copy(wheel.worldTransform.quaternion);
             }
-            vehicleRef.current.mesh.position.copy(chassis.chassisBody.position);
-            vehicleRef.current.mesh.quaternion.copy(chassis.chassisBody.quaternion);
+
+            // Update car body mesh
+            vehicleRef.current.mesh.position.copy(vehicleRef.current.chassis.position);
+            vehicleRef.current.mesh.quaternion.copy(vehicleRef.current.chassis.quaternion);
 
             const carPosition = vehicleRef.current.mesh.position;
             const carRotation = vehicleRef.current.mesh.quaternion;
@@ -593,7 +612,7 @@ function App() {
 
             // Update audio
             if (ambientSoundsRef.current.engine) {
-                const speed = vehicleRef.current.body.velocity.length();
+                const speed = vehicleRef.current.chassis.velocity.length();
                 ambientSoundsRef.current.engine.frequency.value = 50 + speed * 10;
             }
         };
@@ -601,7 +620,7 @@ function App() {
         const animate = () => {
             const deltaTime = clockRef.current.getDelta();
             if (worldRef.current) {
-                worldRef.current.step(1 / 60, deltaTime, 3);
+                worldRef.current.fixedStep(); // Use fixedStep for more stable physics
                 updateGameLogic();
             }
             if (rendererRef.current && sceneRef.current && cameraRef.current) {
@@ -620,7 +639,7 @@ function App() {
                 rendererRef.current.domElement.remove();
             }
             if (worldRef.current) {
-                worldRef.current.bodies.forEach(body => worldRef.current.remove(body));
+                worldRef.current.bodies.forEach(body => worldRef.current.removeBody(body));
             }
             if (Tone.Transport) {
                 Tone.Transport.stop();
